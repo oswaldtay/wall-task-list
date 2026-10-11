@@ -187,7 +187,7 @@ export default function App() {
         </Toolbar>
       </AppBar>
 
-      <Container maxWidth={big ? "xl" : "md"} sx={{ mt: big ? 5 : 3 }}>
+      <Container maxWidth={false} sx={{ mt: big ? 5 : 3, px: { xs: 2, md: 4 } }}>
         {error && <Alert severity="error" sx={{ mb: 2 }}>{error}</Alert>}
 
         <Stack spacing={big ? 3 : 2}>
@@ -199,21 +199,29 @@ export default function App() {
                   onClick={() => setEditing(task)}
                   sx={{ flexGrow: 1, "&.Mui-disabled": { opacity: 1 } }}
                 >
-                  <CardContent sx={{ p: big ? 4 : 2.5 }}>
-                    <Typography variant={big ? "h3" : "h6"} fontWeight={700} sx={{ overflowWrap: "anywhere" }}>
-                      {task.title}
-                    </Typography>
-                    {task.time && (
-                      <Stack direction="row" alignItems="center" spacing={0.75} sx={{ mt: 0.5, color: "primary.main" }}>
-                        <AccessTimeIcon fontSize={big ? "large" : "small"} />
-                        <Typography variant={big ? "h5" : "body2"} fontWeight={600}>
-                          {formatTime(task.time)}
-                        </Typography>
-                      </Stack>
-                    )}
+                  <CardContent sx={{ p: { xs: 3, md: 6 }, minHeight: { md: 200 } }}>
+                    <Stack direction="row" alignItems="center" justifyContent="space-between" spacing={4}>
+                      <Typography
+                        fontWeight={800}
+                        sx={{ fontSize: "clamp(2.5rem, 6vw, 6rem)", lineHeight: 1.1, overflowWrap: "anywhere", flex: 1, minWidth: 0 }}
+                      >
+                        {task.title}
+                      </Typography>
+                      {task.time && (
+                        <Stack direction="row" alignItems="center" spacing={2} sx={{ color: "primary.main", flexShrink: 0 }}>
+                          <AccessTimeIcon sx={{ fontSize: "clamp(2.5rem, 6vw, 6rem)" }} />
+                          <Typography
+                            fontWeight={800}
+                            sx={{ fontSize: "clamp(2.5rem, 6vw, 6rem)", lineHeight: 1.1, whiteSpace: "nowrap" }}
+                          >
+                            {formatTime(task.time)}
+                          </Typography>
+                        </Stack>
+                      )}
+                    </Stack>
                     {task.notes && (
                       <Typography
-                        variant={big ? "h5" : "body1"}
+                        variant={big ? "h4" : "h5"}
                         color="text.secondary"
                         sx={{ mt: 1.5, whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}
                       >
