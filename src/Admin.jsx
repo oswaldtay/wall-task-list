@@ -178,7 +178,7 @@ export default function Admin() {
           <Typography variant="h6" fontWeight={800} color="primary" noWrap sx={{ flexGrow: 1, fontSize: { xs: "1.05rem", sm: "1.25rem" } }}>
             Admin
           </Typography>
-          <Button component="a" href="/" color="inherit" size="small">View home</Button>
+          <Button component="a" href="/home" color="inherit" size="small">View home</Button>
           <Button startIcon={<LogoutIcon />} color="inherit" size="small" onClick={() => signOut(auth)}>
             Sign out
           </Button>
