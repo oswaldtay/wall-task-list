@@ -11,10 +11,9 @@ import {
   deleteDoc,
   doc,
   onSnapshot,
-  orderBy,
-  query,
   serverTimestamp,
   updateDoc,
+  writeBatch,
 } from "firebase/firestore";
 import { auth, db } from "./firebase";
 import {
@@ -39,8 +38,12 @@ import {
 } from "@mui/material";
 import AddIcon from "@mui/icons-material/Add";
 import LogoutIcon from "@mui/icons-material/Logout";
-import AccessTimeIcon from "@mui/icons-material/AccessTime";
+import DragIndicatorIcon from "@mui/icons-material/DragIndicator";
 import ChecklistIcon from "@mui/icons-material/Checklist";
+
+const MAX_TASKS = 14;
+const MAX_TITLE = 40;
+const MAX_NOTES = 60;
 
 const displayMode = new URLSearchParams(
   window.location.search
@@ -53,6 +56,14 @@ export default function App() {
   const [password, setPassword] = useState("");
   const [editing, setEditing] = useState(null);
   const [error, setError] = useState("");
+  const [now, setNow] = useState(() => new Date());
+  const [dragId, setDragId] = useState(null);
+  const [overId, setOverId] = useState(null);
+
+  useEffect(() => {
+    const timer = setInterval(() => setNow(new Date()), 60000);
+    return () => clearInterval(timer);
+  }, []);
 
   useEffect(() => {
     return onAuthStateChanged(auth, setUser);
@@ -61,18 +72,14 @@ export default function App() {
   useEffect(() => {
     if (!user) return;
 
-    const q = query(
-      collection(db, "tasks"),
-      orderBy("time", "asc")
-    );
-
     return onSnapshot(
-      q,
+      collection(db, "tasks"),
       (snapshot) => {
-        setTasks(snapshot.docs.map((item) => ({
+        const list = snapshot.docs.map((item) => ({
           id: item.id,
           ...item.data(),
-        })));
+        }));
+        setTasks(list.sort((a, b) => effectiveOrder(a) - effectiveOrder(b)));
       },
       (err) => setError(err.message)
     );
@@ -93,12 +100,14 @@ export default function App() {
     const form = new FormData(e.currentTarget);
     const task = {
       title: String(form.get("title")).trim(),
-      time: String(form.get("time")),
       notes: String(form.get("notes")).trim(),
-      updatedAt: serverTimestamp(),
     };
 
     if (!task.title) return;
+    if (!editing?.id && tasks.length >= MAX_TASKS) {
+      setError(`You can have at most ${MAX_TASKS} tasks.`);
+      return;
+    }
 
     try {
       if (editing?.id) {
@@ -106,6 +115,7 @@ export default function App() {
       } else {
         await addDoc(collection(db, "tasks"), {
           ...task,
+          order: tasks.length ? Math.max(...tasks.map(effectiveOrder)) + 1 : 0,
           createdAt: serverTimestamp(),
         });
       }
@@ -113,6 +123,27 @@ export default function App() {
       setError("");
     } catch (err) {
       setError(`Could not save task: ${err.message}`);
+    }
+  }
+
+  async function dropTask(targetId) {
+    const from = tasks.findIndex((t) => t.id === dragId);
+    const to = tasks.findIndex((t) => t.id === targetId);
+    setDragId(null);
+    setOverId(null);
+    if (from < 0 || to < 0 || from === to) return;
+
+    const next = [...tasks];
+    const [moved] = next.splice(from, 1);
+    next.splice(to, 0, moved);
+    setTasks(next.map((t, i) => ({ ...t, order: i })));
+
+    try {
+      const batch = writeBatch(db);
+      next.forEach((t, i) => batch.update(doc(db, "tasks", t.id), { order: i }));
+      await batch.commit();
+    } catch (err) {
+      setError(`Could not reorder tasks: ${err.message}`);
     }
   }
 
@@ -170,60 +201,86 @@ export default function App() {
   }
 
   const big = displayMode;
+  const titleSize = `min(8rem, calc((100vw - 170px) / ${MAX_TITLE * 0.6}), calc((100vh - ${big ? 190 : 130}px) / ${Math.max(tasks.length, 1)} * 0.56))`;
+  const notesSize = `min(calc(${titleSize} * 0.6), calc((100vw - 170px) / ${MAX_NOTES * 0.6}))`;
 
   return (
-    <Box sx={{ minHeight: "100vh", pb: displayMode ? 4 : 12 }}>
-      <AppBar position="sticky" color="inherit" elevation={0} sx={{ borderBottom: 1, borderColor: "divider", bgcolor: "rgba(255,255,255,.85)", backdropFilter: "blur(8px)" }}>
-        <Toolbar sx={{ gap: 1.5, py: big ? 2 : 0 }}>
-          <ChecklistIcon color="primary" sx={{ fontSize: big ? 48 : 30 }} />
-          <Typography variant={big ? "h2" : "h5"} fontWeight={700} sx={{ flexGrow: 1 }}>
-            Task List
+    <Box sx={{ height: "100vh", display: "flex", flexDirection: "column", overflow: "hidden" }}>
+      <AppBar position="static" color="inherit" elevation={0} sx={{ borderBottom: 1, borderColor: "divider", bgcolor: "rgba(255,255,255,.85)", backdropFilter: "blur(8px)" }}>
+        <Toolbar sx={{ py: big ? 2 : 0, justifyContent: "center", position: "relative" }}>
+          <Typography
+            component="time"
+            fontWeight={900}
+            color="primary"
+            sx={{ whiteSpace: "nowrap", textAlign: "center", lineHeight: 1.1, fontSize: big ? "clamp(2.5rem, 4.5vw, 5rem)" : "clamp(2rem, 3.5vw, 4rem)" }}
+          >
+            {now.toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric", year: "numeric" })}
           </Typography>
           {!displayMode && (
-            <Button startIcon={<LogoutIcon />} color="inherit" onClick={() => signOut(auth)}>
+            <Button startIcon={<LogoutIcon />} color="inherit" size="small" onClick={() => signOut(auth)} sx={{ position: "absolute", right: 8, fontSize: "0.7rem", minWidth: 0, px: 1, py: 0.25 }}>
               Sign out
             </Button>
           )}
         </Toolbar>
       </AppBar>
 
-      <Container maxWidth={false} sx={{ mt: big ? 5 : 3, px: { xs: 2, md: 4 } }}>
+      <Container maxWidth={false} sx={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column", py: 0.5, px: { xs: 2, md: 4 } }}>
         {error && <Alert severity="error" sx={{ mb: 2 }}>{error}</Alert>}
 
-        <Stack spacing={big ? 3 : 2}>
+        <Stack spacing={0.5} sx={{ flex: 1, minHeight: 0 }}>
           {tasks.map((task) => (
-            <Card key={task.id} sx={!displayMode ? { "&:hover": { boxShadow: 6, transform: "translateY(-2px)" } } : undefined}>
-              <Box sx={{ display: "flex", alignItems: "center" }}>
+            <Card
+              key={task.id}
+              draggable={!displayMode}
+              onDragStart={(e) => {
+                e.dataTransfer.effectAllowed = "move";
+                setDragId(task.id);
+              }}
+              onDragOver={(e) => {
+                if (!dragId) return;
+                e.preventDefault();
+                setOverId(task.id);
+              }}
+              onDrop={(e) => {
+                e.preventDefault();
+                dropTask(task.id);
+              }}
+              onDragEnd={() => {
+                setDragId(null);
+                setOverId(null);
+              }}
+              sx={{
+                flex: "1 1 0",
+                minHeight: 0,
+                display: "flex",
+                opacity: dragId === task.id ? 0.4 : 1,
+                outline: overId === task.id && dragId !== task.id ? "3px solid" : "none",
+                outlineColor: "primary.main",
+                ...(!displayMode && { "&:hover": { boxShadow: 6 } }),
+              }}
+            >
+              <Box sx={{ display: "flex", alignItems: "center", width: "100%", minHeight: 0 }}>
+                {!displayMode && (
+                  <DragIndicatorIcon sx={{ ml: 1, fontSize: "min(40px, 4vh)", color: "text.secondary", cursor: "grab", flexShrink: 0 }} />
+                )}
                 <CardActionArea
                   disabled={displayMode}
                   onClick={() => setEditing(task)}
-                  sx={{ flexGrow: 1, "&.Mui-disabled": { opacity: 1 } }}
+                  sx={{ flexGrow: 1, height: "100%", display: "flex", alignItems: "center", justifyContent: "flex-start", "&.Mui-disabled": { opacity: 1 } }}
                 >
-                  <CardContent sx={{ p: { xs: 3, md: 6 }, minHeight: { md: 200 } }}>
-                    <Stack direction="row" alignItems="center" justifyContent="space-between" spacing={4}>
+                  <CardContent sx={{ px: 1.5, py: 0, "&:last-child": { pb: 0 }, width: "100%", minWidth: 0, overflow: "hidden" }}>
+                    <Stack direction="row" alignItems="center" spacing={4}>
                       <Typography
-                        fontWeight={800}
-                        sx={{ fontSize: "clamp(2.5rem, 6vw, 6rem)", lineHeight: 1.1, overflowWrap: "anywhere", flex: 1, minWidth: 0 }}
+                        fontWeight={900}
+                        sx={{ fontSize: titleSize, lineHeight: 1.1, flex: 1, minWidth: 0, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}
                       >
                         {task.title}
                       </Typography>
-                      {task.time && (
-                        <Stack direction="row" alignItems="center" spacing={2} sx={{ color: "primary.main", flexShrink: 0 }}>
-                          <AccessTimeIcon sx={{ fontSize: "clamp(2.5rem, 6vw, 6rem)" }} />
-                          <Typography
-                            fontWeight={800}
-                            sx={{ fontSize: "clamp(2.5rem, 6vw, 6rem)", lineHeight: 1.1, whiteSpace: "nowrap" }}
-                          >
-                            {formatTime(task.time)}
-                          </Typography>
-                        </Stack>
-                      )}
                     </Stack>
                     {task.notes && (
                       <Typography
-                        variant={big ? "h4" : "h5"}
                         color="text.secondary"
-                        sx={{ mt: 1.5, whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}
+                        sx={{ fontSize: notesSize, lineHeight: 1.2, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}
                       >
                         {task.notes}
                       </Typography>
@@ -245,7 +302,8 @@ export default function App() {
         <Fab
           color="primary"
           aria-label="Add task"
-          onClick={() => setEditing({ title: "", time: "", notes: "" })}
+          disabled={tasks.length >= MAX_TASKS}
+          onClick={() => setEditing({ title: "", notes: "" })}
           sx={{ position: "fixed", right: 24, bottom: 24 }}
         >
           <AddIcon />
@@ -270,24 +328,16 @@ export default function App() {
                 required
                 autoFocus
                 fullWidth
-                slotProps={{ htmlInput: { maxLength: 120 } }}
-              />
-              <TextField
-                name="time"
-                label="Time"
-                type="time"
-                defaultValue={editing?.time}
-                fullWidth
-                slotProps={{ inputLabel: { shrink: true } }}
+                helperText={`Up to ${MAX_TITLE} characters`}
+                slotProps={{ htmlInput: { maxLength: MAX_TITLE } }}
               />
               <TextField
                 name="notes"
                 label="Notes"
                 defaultValue={editing?.notes}
-                multiline
-                minRows={4}
+                helperText={`Up to ${MAX_NOTES} characters, single line`}
                 fullWidth
-                slotProps={{ htmlInput: { maxLength: 2000 } }}
+                slotProps={{ htmlInput: { maxLength: MAX_NOTES } }}
               />
             </Stack>
           </DialogContent>
@@ -306,10 +356,7 @@ export default function App() {
   );
 }
 
-function formatTime(value) {
-  if (!value) return "";
-  const [hours, minutes] = value.split(":").map(Number);
-  const suffix = hours >= 12 ? "PM" : "AM";
-  const hour = hours % 12 || 12;
-  return `${hour}:${String(minutes).padStart(2, "0")} ${suffix}`;
+function effectiveOrder(task) {
+  if (typeof task.order === "number") return task.order;
+  return 1e12 + (task.createdAt?.toMillis?.() ?? 0);
 }
